@@ -13,8 +13,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Store connected users
 clients = {}
 
+# Home route
+@app.get("/")
+def home():
+    return {"message": "GlobalChat backend running 🚀"}
+
+# WebSocket
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
@@ -30,6 +37,9 @@ async def websocket_endpoint(websocket: WebSocket):
         "lang": lang
     }
 
+    # 🔥 Send user list to all
+    await broadcast_users()
+
     try:
         while True:
             data = await websocket.receive_text()
@@ -39,31 +49,32 @@ async def websocket_endpoint(websocket: WebSocket):
             receiver = msg_data["receiver"]
             message = msg_data["message"]
 
-            # 🔥 SEND TO RECEIVER (translated)
             if receiver in clients:
-                try:
-                    receiver_lang = clients[receiver]["lang"]
+                translated = GoogleTranslator(
+                    source='auto',
+                    target=clients[receiver]["lang"]
+                ).translate(message)
 
-                    translated = GoogleTranslator(
-                        source='auto',
-                        target=receiver_lang
-                    ).translate(message)
+                await clients[receiver]["ws"].send_text(json.dumps({
+                    "type": "msg",
+                    "data": f"{sender}: {translated}"
+                }))
 
-                    await clients[receiver]["ws"].send_text(
-                        f"{sender}: {translated}"
-                    )
-
-                except Exception as e:
-                    await clients[receiver]["ws"].send_text(
-                        f"{sender}: {message}"
-                    )
-
-            # 🔥 SEND TO SENDER (original only)
-            if sender in clients:
-                await clients[sender]["ws"].send_text(
-                    f"{sender}: {message}"
-                )
+            # sender also gets own message
+            await clients[sender]["ws"].send_text(json.dumps({
+                "type": "msg",
+                "data": f"{sender}: {message}"
+            }))
 
     except WebSocketDisconnect:
-        if name in clients:
-            del clients[name]
+        del clients[name]
+        await broadcast_users()
+
+# 🔥 Broadcast user list
+async def broadcast_users():
+    user_list = list(clients.keys())
+    for user in clients:
+        await clients[user]["ws"].send_text(json.dumps({
+            "type": "users",
+            "users": user_list
+        }))
