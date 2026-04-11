@@ -13,13 +13,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Store connected users
 clients = {}
 
+# Home route
 @app.get("/")
 def home():
     return {"message": "GlobalChat backend running 🚀"}
 
 
+# WebSocket
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
@@ -35,6 +38,7 @@ async def websocket_endpoint(websocket: WebSocket):
         "lang": lang
     }
 
+    # 🔥 Send user list to all
     await broadcast_users()
 
     try:
@@ -42,11 +46,16 @@ async def websocket_endpoint(websocket: WebSocket):
             data = await websocket.receive_text()
             msg_data = json.loads(data)
 
+            # 🔁 HANDLE PING (PERMANENT FIX)
+            if "type" in msg_data and msg_data["type"] == "ping":
+                await broadcast_users()
+                continue
+
             sender = msg_data["sender"]
             receiver = msg_data["receiver"]
             message = msg_data["message"]
 
-            # ✅ Check receiver exists
+            # ✅ Receiver message
             if receiver in clients:
                 try:
                     translated = GoogleTranslator(
@@ -61,7 +70,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     "data": f"{sender}: {translated}"
                 }))
 
-            # ✅ Send back to sender safely
+            # ✅ Sender message (safe)
             if sender in clients:
                 await clients[sender]["ws"].send_text(json.dumps({
                     "type": "msg",
@@ -74,6 +83,7 @@ async def websocket_endpoint(websocket: WebSocket):
         await broadcast_users()
 
 
+# 🔥 Broadcast user list
 async def broadcast_users():
     user_list = list(clients.keys())
     for user in clients:
